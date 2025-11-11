@@ -24,9 +24,7 @@ steps:
       - '--update-secrets'
       - 'JWT_SECRET_KEY=jwt-secret-key:latest'
       - '--set-env-vars'
-      - 'GCP_PROJECT_ID=$PROJECT_ID'
-      - '--set-env-vars'
-      - 'GCP_REGION=europe-west1'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=europe-west1'
 
 images:
   - 'gcr.io/$PROJECT_ID/gcp-bearer-auth-service:$COMMIT_SHA'
