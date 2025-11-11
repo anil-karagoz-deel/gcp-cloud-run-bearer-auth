@@ -31,9 +31,10 @@ wheels/
 *~
 .DS_Store
 
-# Environment variables
+# Environment variables (never commit these!)
 .env
 .env.local
+.env.*.local
 
 # Cloud
 .gcloud/

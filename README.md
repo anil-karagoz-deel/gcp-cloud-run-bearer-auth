@@ -99,18 +99,37 @@ docker run -p 8080:8080 -e BEARER_TOKEN="your-secret-token" gcp-bearer-auth-serv
 ### Prerequisites
 - [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
 - A GCP project with billing enabled
-- Cloud Run API enabled
+- Authenticated with gcloud: `gcloud auth login`
 
 ### Deploy
 
-1. Set your GCP project ID:
+The deployment script automatically:
+- Enables required Google Cloud APIs (Secret Manager, Cloud Build, Cloud Run)
+- Stores the Bearer token securely in Secret Manager
+- Builds the container image using Cloud Build
+- Deploys to Cloud Run with the configured settings
+
+#### Option 1: Using Environment Variables
+
 ```bash
-export GCP_PROJECT_ID="your-gcp-project-id"
+export PROJECT_ID="your-gcp-project-id"
+export REGION="us-central1"
+export BEARER_TOKEN="your-secret-token"
+./deploy.sh
 ```
 
-2. Set your Bearer token:
+#### Option 2: Using a .env File (Recommended)
+
+1. Copy the example environment file:
 ```bash
-export BEARER_TOKEN="your-secret-token"
+cp .env.example .env
+```
+
+2. Edit `.env` with your configuration:
+```bash
+PROJECT_ID=my-gcp-project-123
+REGION=us-central1
+BEARER_TOKEN=$(openssl rand -base64 32)  # Generate secure token
 ```
 
 3. Run the deployment script:
@@ -119,16 +138,47 @@ export BEARER_TOKEN="your-secret-token"
 ```
 
 The script will:
+- Validate all required environment variables
+- Enable necessary Google Cloud APIs
+- Store the Bearer token in Secret Manager (not as plain environment variable)
 - Build the container image using Google Cloud Build
-- Deploy to Cloud Run in the `us-central1` region
-- Configure the service with your Bearer token
-- Output the service URL
+- Deploy to Cloud Run with optimal settings
+- Output the service URL and test commands
+
+### Configuration Options
+
+The deployment script supports various configuration options via environment variables:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PROJECT_ID` | ✅ Yes | - | Your GCP project ID |
+| `REGION` | ✅ Yes | - | GCP region for deployment |
+| `BEARER_TOKEN` | ✅ Yes | - | Secret token for API authentication |
+| `SERVICE_NAME` | No | `gcp-bearer-auth-service` | Cloud Run service name |
+| `BEARER_TOKEN_SECRET_NAME` | No | `bearer-token` | Secret Manager secret name |
+| `PORT` | No | `8080` | Container port |
+| `MEMORY` | No | `512Mi` | Memory allocation |
+| `CPU` | No | `1` | CPU allocation |
+| `MAX_INSTANCES` | No | `10` | Maximum autoscaling instances |
+| `MIN_INSTANCES` | No | `0` | Minimum instances (0 = scale to zero) |
+| `TIMEOUT` | No | `300` | Request timeout in seconds |
+| `ALLOW_UNAUTHENTICATED` | No | `true` | Allow public access to service |
 
 ### Manual Deployment
 
 If you prefer manual deployment:
 
 ```bash
+# Enable required APIs
+gcloud services enable secretmanager.googleapis.com
+gcloud services enable cloudbuild.googleapis.com
+gcloud services enable run.googleapis.com
+
+# Create secret for bearer token
+echo -n "your-secret-token" | gcloud secrets create bearer-token \
+  --replication-policy=automatic \
+  --data-file=-
+
 # Build and push the image
 gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/gcp-bearer-auth-service
 
@@ -138,7 +188,9 @@ gcloud run deploy gcp-bearer-auth-service \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars BEARER_TOKEN=your-secret-token
+  --update-secrets BEARER_TOKEN=bearer-token:latest \
+  --memory 512Mi \
+  --cpu 1
 ```
 
 ## Testing the Deployed Service
@@ -156,23 +208,34 @@ curl $SERVICE_URL/api/health
 curl -H "Authorization: Bearer your-secret-token" $SERVICE_URL/api/secure
 ```
 
-## Configuration
+## Runtime Configuration
 
-### Environment Variables
+### Environment Variables (Application)
 
 | Variable | Description | Default |
 |----------|-------------|---------||
-| `BEARER_TOKEN` | Secret token for authentication | `default-secret-token` |
+| `BEARER_TOKEN` | Secret token for authentication (provided via Secret Manager) | `default-secret-token` |
 | `PORT` | Port the service listens on | `8080` |
-| `GCP_PROJECT_ID` | Your GCP project ID (for deployment) | - |
 
 ## Security Considerations
 
-- **Always use strong, randomly generated tokens in production**
-- Store tokens securely (use Google Secret Manager for production)
-- Use HTTPS (Cloud Run provides this automatically)
-- Consider implementing token rotation
-- Monitor access logs for suspicious activity
+- ✅ **Secrets in Secret Manager**: The deployment script automatically stores the Bearer token in Google Secret Manager, not as a plain environment variable
+- ✅ **HTTPS by default**: Cloud Run provides automatic HTTPS for all services
+- ✅ **Strong tokens**: Generate secure tokens using `openssl rand -base64 32`
+- ✅ **IAM integration**: Control access using Google Cloud IAM roles and service accounts
+- 🔄 **Token rotation**: Update tokens by running the deployment script with a new `BEARER_TOKEN` value
+- 📊 **Monitoring**: Use Cloud Logging and Cloud Monitoring to track access patterns
+- 🔒 **Network security**: Consider using VPC ingress controls for additional protection
+
+### Generating a Secure Token
+
+```bash
+# Generate a random 32-byte token (base64 encoded)
+openssl rand -base64 32
+
+# Or use Python
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
 
 ## License
 
