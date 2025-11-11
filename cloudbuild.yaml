@@ -13,7 +13,7 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'gcp-bearer-auth-service'
+      - 'gcp-cloud-run-bearer-auth'
       - '--image'
       - 'gcr.io/$PROJECT_ID/gcp-bearer-auth-service:$COMMIT_SHA'
       - '--region'
