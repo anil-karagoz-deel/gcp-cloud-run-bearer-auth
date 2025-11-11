@@ -1,18 +1,20 @@
 """
-Google Cloud Run service with Bearer token authentication.
+Google Cloud Run service with JWT Bearer token authentication.
 Responds to authorized GET requests with a success message.
 """
 import os
+import jwt
+from datetime import datetime
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Get the bearer token from environment variable
-BEARER_TOKEN = os.environ.get('BEARER_TOKEN', 'default-secret-token')
+# Get the JWT secret key from environment variable
+JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'default-secret-key')
 
 
-def verify_bearer_token():
-    """Verify the Bearer token from the Authorization header."""
+def verify_jwt_token():
+    """Verify the JWT Bearer token from the Authorization header."""
     auth_header = request.headers.get('Authorization')
     
     if not auth_header:
@@ -23,10 +25,24 @@ def verify_bearer_token():
     
     token = auth_header.replace('Bearer ', '', 1)
     
-    if token != BEARER_TOKEN:
-        return False, "Invalid token"
+    try:
+        # Decode and verify the JWT token
+        payload = jwt.decode(
+            token,
+            JWT_SECRET_KEY,
+            algorithms=['HS256']
+        )
+        
+        # Optional: Add additional claims validation here
+        # For example, check 'sub', 'aud', or custom claims
+        
+        return True, "Token valid"
     
-    return True, "Token valid"
+    except jwt.ExpiredSignatureError:
+        return False, "Token has expired"
+    
+    except jwt.InvalidTokenError as e:
+        return False, f"Invalid token: {str(e)}"
 
 
 @app.route('/', methods=['GET'])
@@ -40,8 +56,8 @@ def health_check():
 
 @app.route('/api/secure', methods=['GET'])
 def secure_endpoint():
-    """Secure endpoint that requires Bearer token authentication."""
-    is_valid, message = verify_bearer_token()
+    """Secure endpoint that requires JWT Bearer token authentication."""
+    is_valid, message = verify_jwt_token()
     
     if not is_valid:
         return jsonify({
