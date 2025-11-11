@@ -1,202 +1,196 @@
+"""
+Google Cloud Run service with JWT Bearer token authentication.
+Responds to authorized GET requests with a success message.
+Provides status information for all Cloud Run services in the project.
+Version: 1.0.2
+"""
 import os
-from flask import Flask, request, jsonify
 import jwt
-from datetime import datetime, timezone
-from functools import wraps
+from datetime import datetime
+from flask import Flask, request, jsonify
 from google.cloud import run_v2
 from google.api_core import exceptions as google_exceptions
 
 app = Flask(__name__)
 
-# Configuration
+# Get the JWT secret key from environment variable
 JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'default-secret-key')
-GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
+
+# Get GCP project and region from environment
+GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID', None)
 GCP_REGION = os.environ.get('GCP_REGION', 'us-central1')
 
+
 def verify_jwt_token():
-    """Verify JWT token from Authorization header."""
+    """Verify the JWT Bearer token from the Authorization header."""
     auth_header = request.headers.get('Authorization')
     
     if not auth_header:
-        return False, "Authorization header required"
+        return False, "Missing Authorization header"
+    
+    if not auth_header.startswith('Bearer '):
+        return False, "Invalid Authorization header format. Use: Bearer <token>"
+    
+    token = auth_header.split(' ')[1]
+    
+    if not token.startswith('eyJ'):
+        return False, "Invalid JWT token format. JWT tokens must start with 'eyJ'"
     
     try:
-        # Extract token from "Bearer <token>" format
-        scheme, token = auth_header.split()
-        if scheme.lower() != 'bearer':
-            return False, "Invalid authentication scheme"
-    except ValueError:
-        return False, "Invalid Authorization header format"
-    
-    try:
-        # Verify and decode the JWT token
-        payload = jwt.decode(
-            token,
-            JWT_SECRET_KEY,
-            algorithms=['HS256']
-        )
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=['HS256'])
         return True, payload
     except jwt.ExpiredSignatureError:
         return False, "Token has expired"
-    except jwt.InvalidSignatureError:
-        return False, "Invalid token: Signature verification failed"
-    except jwt.DecodeError as e:
+    except jwt.InvalidTokenError as e:
         return False, f"Invalid token: {str(e)}"
-    except Exception as e:
-        return False, f"Token validation error: {str(e)}"
 
-@app.route('/')
-def root():
-    """Root endpoint for basic health check."""
+
+@app.route('/', methods=['GET'])
+def health_check():
+    """Basic health check endpoint."""
     return jsonify({
-        "status": "ok",
-        "message": "GCP Cloud Run Bearer Auth Service",
-        "endpoints": {
-            "health": "/api/health",
-            "secure": "/api/secure (requires JWT)"
-        }
-    }), 200
+        'status': 'healthy',
+        'service': 'gcp-bearer-auth-service',
+        'timestamp': datetime.utcnow().isoformat()
+    })
 
-@app.route('/api/secure')
+
+@app.route('/api/health', methods=['GET'])
+def api_health():
+    """API health check endpoint."""
+    return jsonify({
+        'status': 'healthy',
+        'message': 'API is running',
+        'timestamp': datetime.utcnow().isoformat()
+    })
+
+
+@app.route('/api/secure', methods=['GET'])
 def secure_endpoint():
-    """Secure endpoint that requires JWT Bearer token authentication."""
-    is_valid, message = verify_jwt_token()
+    """Secured endpoint that requires JWT Bearer token authentication."""
+    is_valid, result = verify_jwt_token()
     
     if not is_valid:
         return jsonify({
-            "error": "Unauthorized",
-            "message": message
+            'error': 'Unauthorized',
+            'message': result
         }), 401
     
     return jsonify({
-        "success": True,
-        "message": "Request authorized successfully!",
-        "data": "This is your secure response data.",
-        "version": "1.0.1"
-    }), 200
+        'success': True,
+        'message': 'Request authorized successfully!',
+        'data': 'This is your secure response data.',
+        'version': '1.0.2'
+    })
 
-@app.route('/api/health')
-def health():
-    """Health check endpoint."""
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "service": "gcp-bearer-auth-service"
-    }), 200
 
-@app.route('/api/services')
+@app.route('/api/services', methods=['GET'])
 def list_services():
-    """List all Cloud Run services in the project (requires JWT authentication)."""
-    is_valid, message = verify_jwt_token()
+    """List all Cloud Run services in the project.
     
+    Requires JWT Bearer token authentication.
+    Returns detailed information about all services including:
+    - Service name and URL
+    - Description
+    - Creation and update times
+    - Creator email
+    - Health status
+    - Traffic routing
+    - Scaling configuration
+    """
+    # Verify JWT token
+    is_valid, result = verify_jwt_token()
     if not is_valid:
         return jsonify({
-            "error": "Unauthorized",
-            "message": message
+            'error': 'unauthorized',
+            'message': result
         }), 401
     
+    # Check if project ID is configured
     if not GCP_PROJECT_ID:
         return jsonify({
-            "error": "Configuration Error",
-            "message": "GCP_PROJECT_ID environment variable not set"
+            'error': 'configuration_error',
+            'message': 'GCP_PROJECT_ID environment variable is not set'
         }), 500
     
     try:
         # Initialize Cloud Run client
         client = run_v2.ServicesClient()
         
-        # Build the parent path
-        parent = f"projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}"
+        # List all services in the project
+        parent = f"projects/{GCP_PROJECT_ID}/locations/-"
+        request_obj = run_v2.ListServicesRequest(parent=parent)
         
-        # List services
         services = []
-        for service in client.list_services(parent=parent):
+        page_result = client.list_services(request=request_obj)
+        
+        for service in page_result:
+            # Extract service information
             service_info = {
-                "name": service.name.split('/')[-1],
-                "full_name": service.name,
-                "uri": service.uri if service.uri else None,
-                "description": service.description if service.description else None,
-                "created_time": service.create_time.isoformat() if service.create_time else None,
-                "updated_time": service.update_time.isoformat() if service.update_time else None,
-                "creator": service.creator if service.creator else None,
-                "last_modifier": service.last_modifier if service.last_modifier else None,
-                "generation": service.generation,
+                'name': service.name.split('/')[-1],
+                'url': service.uri,
+                'description': service.description or 'No description provided',
+                'created': service.create_time.isoformat() if service.create_time else None,
+                'updated': service.update_time.isoformat() if service.update_time else None,
+                'creator': service.creator or 'Unknown',
+                'region': service.name.split('/')[3],
             }
             
-            # Add conditions (health status)
+            # Get latest revision info
+            if service.latest_ready_revision:
+                service_info['latest_revision'] = service.latest_ready_revision.split('/')[-1]
+            
+            # Get condition status
             if service.conditions:
-                service_info["conditions"] = [
-                    {
-                        "type": condition.type,
-                        "state": str(condition.state),
-                        "message": condition.message if condition.message else None,
-                        "last_transition_time": condition.last_transition_time.isoformat() if condition.last_transition_time else None,
-                        "severity": str(condition.severity) if condition.severity else None
-                    }
-                    for condition in service.conditions
-                ]
-                
-                # Determine overall status
-                ready_condition = next((c for c in service.conditions if c.type == "Ready"), None)
+                ready_condition = next((c for c in service.conditions if c.type == 'Ready'), None)
                 if ready_condition:
-                    service_info["status"] = "ready" if str(ready_condition.state) == "4" else "not_ready"
-                else:
-                    service_info["status"] = "unknown"
+                    service_info['health'] = ready_condition.state.name
+                    if ready_condition.message:
+                        service_info['health_message'] = ready_condition.message
             
-            # Add ingress settings
+            # Get ingress settings
             if service.ingress:
-                service_info["ingress"] = str(service.ingress)
+                service_info['ingress'] = service.ingress.name
             
-            # Add traffic information
+            # Get traffic routing
             if service.traffic:
-                service_info["traffic"] = [
+                service_info['traffic'] = [
                     {
-                        "type": str(t.type_),
-                        "revision": t.revision if t.revision else None,
-                        "percent": t.percent,
-                        "tag": t.tag if t.tag else None
+                        'type': t.type_.name if hasattr(t.type_, 'name') else str(t.type_),
+                        'percent': t.percent,
+                        'revision': t.revision.split('/')[-1] if t.revision else None
                     }
                     for t in service.traffic
                 ]
             
-            # Add scaling configuration
+            # Get scaling configuration
             if service.template and service.template.scaling:
-                service_info["scaling"] = {
-                    "min_instances": service.template.scaling.min_instance_count,
-                    "max_instances": service.template.scaling.max_instance_count
+                service_info['scaling'] = {
+                    'minInstances': service.template.scaling.min_instance_count,
+                    'maxInstances': service.template.scaling.max_instance_count
                 }
             
             services.append(service_info)
         
         return jsonify({
-            "success": True,
-            "project_id": GCP_PROJECT_ID,
-            "region": GCP_REGION,
-            "service_count": len(services),
-            "services": services
-        }), 200
+            'status': 'success',
+            'count': len(services),
+            'services': services
+        })
         
     except google_exceptions.PermissionDenied as e:
         return jsonify({
-            "error": "Permission Denied",
-            "message": "Service account does not have permission to list Cloud Run services",
-            "details": str(e)
+            'error': 'permission_denied',
+            'message': 'Service account lacks permission to list Cloud Run services',
+            'details': str(e)
         }), 403
-    
-    except google_exceptions.NotFound as e:
-        return jsonify({
-            "error": "Not Found",
-            "message": f"Project or region not found: {GCP_PROJECT_ID}/{GCP_REGION}",
-            "details": str(e)
-        }), 404
-    
     except Exception as e:
         return jsonify({
-            "error": "Internal Server Error",
-            "message": "Failed to list Cloud Run services",
-            "details": str(e)
+            'error': 'internal_error',
+            'message': f'Failed to list services: {str(e)}'
         }), 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port)
