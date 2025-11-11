@@ -27,12 +27,12 @@ require_command gcloud
 # Required environment variables
 : "${PROJECT_ID:?Set PROJECT_ID in your environment or .env file}"
 : "${REGION:?Set REGION in your environment or .env file}"
-: "${BEARER_TOKEN:?Set BEARER_TOKEN to your secret token value}"
+: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY to your secret key value}"
 
 # Optional overrides
 SERVICE_NAME="${SERVICE_NAME:-gcp-bearer-auth-service}"
 IMAGE_NAME="${IMAGE_NAME:-gcr.io/${PROJECT_ID}/${SERVICE_NAME}}"
-BEARER_TOKEN_SECRET_NAME="${BEARER_TOKEN_SECRET_NAME:-bearer-token}"
+JWT_SECRET_NAME="${JWT_SECRET_NAME:-jwt-secret-key}"
 PORT="${PORT:-8080}"
 MEMORY="${MEMORY:-512Mi}"
 CPU="${CPU:-1}"
@@ -69,13 +69,13 @@ ensure_api_enabled cloudbuild.googleapis.com
 ensure_api_enabled run.googleapis.com
 
 echo ""
-echo "▶ Managing Bearer token in Secret Manager"
-if gcloud "${GCLOUD_PROJECT_ARGS[@]}" secrets describe "${BEARER_TOKEN_SECRET_NAME}" >/dev/null 2>&1; then
-  echo "✔ Secret ${BEARER_TOKEN_SECRET_NAME} exists, updating with new version"
-  printf "%s" "${BEARER_TOKEN}" | gcloud "${GCLOUD_PROJECT_ARGS[@]}" secrets versions add "${BEARER_TOKEN_SECRET_NAME}" --data-file=-
+echo "▶ Managing JWT secret key in Secret Manager"
+if gcloud "${GCLOUD_PROJECT_ARGS[@]}" secrets describe "${JWT_SECRET_NAME}" >/dev/null 2>&1; then
+  echo "✔ Secret ${JWT_SECRET_NAME} exists, updating with new version"
+  printf "%s" "${JWT_SECRET_KEY}" | gcloud "${GCLOUD_PROJECT_ARGS[@]}" secrets versions add "${JWT_SECRET_NAME}" --data-file=-
 else
-  echo "✔ Creating new secret ${BEARER_TOKEN_SECRET_NAME}"
-  printf "%s" "${BEARER_TOKEN}" | gcloud "${GCLOUD_PROJECT_ARGS[@]}" secrets create "${BEARER_TOKEN_SECRET_NAME}" --replication-policy=automatic --data-file=-
+  echo "✔ Creating new secret ${JWT_SECRET_NAME}"
+  printf "%s" "${JWT_SECRET_KEY}" | gcloud "${GCLOUD_PROJECT_ARGS[@]}" secrets create "${JWT_SECRET_NAME}" --replication-policy=automatic --data-file=-
 fi
 
 echo ""
@@ -97,7 +97,7 @@ DEPLOY_ARGS=(
   --max-instances "${MAX_INSTANCES}"
   --min-instances "${MIN_INSTANCES}"
   --timeout "${TIMEOUT}"
-  --update-secrets "BEARER_TOKEN=${BEARER_TOKEN_SECRET_NAME}:latest"
+  --update-secrets "JWT_SECRET_KEY=${JWT_SECRET_NAME}:latest"
 )
 
 if [[ "${ALLOW_UNAUTHENTICATED}" == "true" ]]; then
@@ -122,7 +122,10 @@ echo "🔑 Test the service:"
 echo "   # Health check (public)"
 echo "   curl ${SERVICE_URL}/api/health"
 echo ""
-echo "   # Secure endpoint (requires Bearer token)"
-echo "   curl -H \"Authorization: Bearer ${BEARER_TOKEN}\" ${SERVICE_URL}/api/secure"
+echo "   # Generate a JWT token first:"
+echo "   python3 generate_jwt.py --secret ${JWT_SECRET_KEY}"
 echo ""
-echo "ℹ️  Bearer token stored in Secret Manager: ${BEARER_TOKEN_SECRET_NAME}"
+echo "   # Then test secure endpoint with JWT (use token from generator):"
+echo "   curl -H \"Authorization: Bearer YOUR_JWT_TOKEN\" ${SERVICE_URL}/api/secure"
+echo ""
+echo "ℹ️  JWT secret key stored in Secret Manager: ${JWT_SECRET_NAME}"
