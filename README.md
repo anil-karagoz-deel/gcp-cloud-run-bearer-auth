@@ -1,17 +1,17 @@
-# GCP Cloud Run Service - JWT Bearer Auth
+# GCP Cloud Run Bearer Auth Service
 
-A lightweight Python Flask service deployed to Google Cloud Run that responds to JWT Bearer token-authorized GET requests.
+A production-ready Python Flask service deployed on Google Cloud Run that demonstrates JWT (JSON Web Token) authentication for secure API endpoints.
 
 ## Features
 
-- ✅ **JWT (JSON Web Token) authentication** - Tokens start with `eyJ`
-- ✅ Token expiration validation
+- ✅ JWT-based authentication with signature verification
+- ✅ Secure bearer token validation (tokens start with `eyJ`)
 - ✅ RESTful API endpoints
-- ✅ Health check endpoints
-- ✅ Docker containerized
-- ✅ Ready for Google Cloud Run deployment
-- ✅ Environment-based configuration
-- ✅ Secure secret management with Google Secret Manager
+- ✅ Production-ready with Gunicorn
+- ✅ Docker containerization optimized for Cloud Run
+- ✅ Automated deployment script with Secret Manager integration
+- ✅ Cloud Run service listing endpoint
+- ✅ Comprehensive error handling
 
 ## API Endpoints
 
@@ -59,299 +59,357 @@ Protected endpoint that requires valid JWT Bearer token (starts with `eyJ`).
 }
 ```
 
-## Generating JWT Tokens
+### 4. List Cloud Run Services (Requires JWT Authentication)
+```bash
+GET /api/services
+Authorization: Bearer <your-jwt-token>
+```
+Returns detailed information about all Cloud Run services in the project.
 
-### Using the Token Generator Script
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "count": 2,
+  "services": [
+    {
+      "name": "bearer-auth-service",
+      "url": "https://bearer-auth-service-abc123-uc.a.run.app",
+      "description": "JWT authenticated API service",
+      "created": "2024-01-15T10:00:00.000000Z",
+      "updated": "2024-01-15T12:30:00.000000Z",
+      "creator": "user@example.com",
+      "health": "Ready",
+      "ingress": "INGRESS_TRAFFIC_ALL",
+      "traffic": [
+        {
+          "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+          "percent": 100
+        }
+      ],
+      "scaling": {
+        "minInstances": 0,
+        "maxInstances": 10
+      }
+    }
+  ]
+}
+```
 
-The project includes a helper script to generate JWT tokens:
+**Error Response (403) - Insufficient Permissions:**
+```json
+{
+  "error": "permission_denied",
+  "message": "Service account lacks permission to list Cloud Run services"
+}
+```
+
+**Required IAM Permissions:**
+The Cloud Run service account needs `roles/run.viewer` to list services. The deployment script automatically configures this permission.
+
+## Testing the API
+
+### 1. Generate a JWT Token
 
 ```bash
-# Install dependencies first
-pip install -r requirements.txt
-
-# Generate a JWT token with a new secret key
+# Generate a token that expires in 1 hour (default)
 python3 generate_jwt.py
 
-# Generate a token with a specific secret key
-python3 generate_jwt.py --secret "your-secret-key"
+# Generate a token with custom expiration (in seconds)
+python3 generate_jwt.py --expires-in 7200  # 2 hours
+```
 
-# Generate a token with custom expiration (default is 365 days)
-python3 generate_jwt.py --secret "your-secret-key" --days 30
+### 2. Test the Endpoints
 
-# Just generate a secret key without a token
+```bash
+# Test health endpoint (no auth required)
+curl https://YOUR_SERVICE_URL/api/health
+
+# Test secure endpoint (requires JWT)
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+     https://YOUR_SERVICE_URL/api/secure
+
+# List all Cloud Run services (requires JWT)
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+     https://YOUR_SERVICE_URL/api/services
+```
+
+### Example Responses
+
+#### Success (Secure Endpoint):
+```json
+{
+  "status": "success",
+  "message": "Authenticated successfully!",
+  "timestamp": "2024-01-15T10:30:00.123456"
+}
+```
+
+#### Success (Services Endpoint):
+```json
+{
+  "status": "success",
+  "count": 3,
+  "services": [
+    {
+      "name": "bearer-auth-service",
+      "url": "https://bearer-auth-service-abc123-uc.a.run.app",
+      "description": "JWT authenticated API service",
+      "created": "2024-01-15T10:00:00.000000Z",
+      "updated": "2024-01-15T12:30:00.000000Z",
+      "creator": "user@example.com",
+      "health": "Ready",
+      "ingress": "INGRESS_TRAFFIC_ALL",
+      "traffic": [
+        {
+          "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+          "percent": 100
+        }
+      ],
+      "scaling": {
+        "minInstances": 0,
+        "maxInstances": 10
+      }
+    }
+  ]
+}
+```
+
+#### Unauthorized (no token):
+```json
+{
+  "error": "unauthorized",
+  "message": "Authorization header required"
+}
+```
+
+#### Unauthorized (invalid token):
+```json
+{
+  "error": "unauthorized",
+  "message": "Invalid or expired token"
+}
+```
+
+## Prerequisites
+
+- Google Cloud SDK (gcloud CLI)
+- Python 3.11+
+- Docker (for local testing)
+- Active GCP project with billing enabled
+- Required GCP APIs (automatically enabled by deployment script):
+  - Cloud Run API
+  - Cloud Build API
+  - Secret Manager API
+
+## Setup
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/anil-karagoz-deel/gcp-cloud-run-bearer-auth.git
+cd gcp-cloud-run-bearer-auth
+```
+
+### 2. Configure Environment
+
+```bash
+# Copy the example env file
+cp .env.example .env
+
+# Edit .env with your configuration
+nano .env
+```
+
+Required configuration:
+```bash
+PROJECT_ID=your-gcp-project-id
+REGION=us-central1
+JWT_SECRET_KEY=your-super-secret-jwt-key-here
+GCP_PROJECT_ID=your-gcp-project-id
+GCP_REGION=us-central1
+```
+
+### 3. Generate a Secure JWT Secret
+
+```bash
+# Option 1: Using openssl
+openssl rand -base64 32
+
+# Option 2: Using Python
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# Option 3: Using the helper script
 python3 generate_jwt.py --generate-secret
 ```
 
-The script will output:
-- The secret key (save this in your `.env` file as `JWT_SECRET_KEY`)
-- The JWT token starting with `eyJ` (use this in your API requests)
+### 4. Deploy to Cloud Run
 
-### Manual JWT Generation
+```bash
+# Make the deployment script executable
+chmod +x deploy.sh
 
-You can also generate tokens manually with Python:
+# Run the deployment
+./deploy.sh
+```
 
-```python
-import jwt
-from datetime import datetime, timedelta, timezone
+The deployment script will:
+- Enable required GCP APIs
+- Store JWT secret in Secret Manager
+- Build the container image using Cloud Build
+- Deploy to Cloud Run with proper configuration
+- Configure service account with Cloud Run viewer permissions
+- Output the service URL
 
-secret_key = "your-secret-key"
-payload = {
-    'sub': 'cloud-run-service',
-    'iat': datetime.now(timezone.utc),
-    'exp': datetime.now(timezone.utc) + timedelta(days=365)
-}
-token = jwt.encode(payload, secret_key, algorithm='HS256')
-print(token)  # Starts with eyJ
+## JWT Authentication
+
+### How It Works
+
+1. **Token Generation**: Use `generate_jwt.py` to create a JWT token signed with your secret key
+2. **Token Format**: Tokens are in JWT format (start with `eyJ`)
+3. **Token Verification**: The service validates:
+   - Token signature using the shared secret key
+   - Token expiration timestamp
+   - Token structure and format
+
+### Token Generation
+
+The included `generate_jwt.py` script provides easy token generation:
+
+```bash
+# Generate token with default 1-hour expiration
+python3 generate_jwt.py
+
+# Generate token with custom expiration
+python3 generate_jwt.py --expires-in 3600  # 1 hour in seconds
+
+# Generate a new secret key
+python3 generate_jwt.py --generate-secret
+```
+
+### Using Tokens
+
+Include the JWT token in the Authorization header:
+
+```bash
+curl -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc..." \
+     https://your-service-url/api/secure
 ```
 
 ## Local Development
 
-### Prerequisites
-- Python 3.11 or higher
-- pip
+### Using Python Virtual Environment
 
-### Setup
-1. Install dependencies:
 ```bash
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
-```
 
-2. Generate a secret key and JWT token:
-```bash
-python3 generate_jwt.py
-# Save the JWT_SECRET_KEY in your environment
-```
+# Set environment variables
+export JWT_SECRET_KEY="your-secret-key"
+export GCP_PROJECT_ID="your-project-id"
+export GCP_REGION="us-central1"
 
-3. Set the JWT secret key:
-```bash
-export JWT_SECRET_KEY="your-secret-key-from-generator"
-```
-
-4. Run the service:
-```bash
+# Run the application
 python main.py
 ```
 
-The service will start on `http://localhost:8080`
-
-### Test Locally
-```bash
-# Generate a JWT token
-JWT_TOKEN=$(python3 generate_jwt.py --secret "your-secret-key" | grep "eyJ" | awk '{print $1}')
-
-# Test without auth (should fail)
-curl http://localhost:8080/api/secure
-
-# Test with JWT auth (should succeed)
-curl -H "Authorization: Bearer $JWT_TOKEN" http://localhost:8080/api/secure
-```
-
-## Docker
-
-### Build the image
-```bash
-docker build -t gcp-bearer-auth-service .
-```
-
-### Run the container
-```bash
-docker run -p 8080:8080 -e JWT_SECRET_KEY="your-secret-key" gcp-bearer-auth-service
-```
-
-## Google Cloud Run Deployment
-
-### Prerequisites
-- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
-- A GCP project with billing enabled
-- Authenticated with gcloud: `gcloud auth login`
-
-### Deploy
-
-The deployment script automatically:
-- Enables required Google Cloud APIs (Secret Manager, Cloud Build, Cloud Run)
-- Stores the Bearer token securely in Secret Manager
-- Builds the container image using Cloud Build
-- Deploys to Cloud Run with the configured settings
-
-#### Option 1: Using Environment Variables
+### Using Docker
 
 ```bash
-export PROJECT_ID="your-gcp-project-id"
-export REGION="us-central1"
-export JWT_SECRET_KEY=$(openssl rand -base64 32)  # Generate secure secret key
-./deploy.sh
+# Build the image
+docker build -t bearer-auth-service .
+
+# Run the container
+docker run -p 8080:8080 \
+  -e JWT_SECRET_KEY="your-secret-key" \
+  -e GCP_PROJECT_ID="your-project-id" \
+  -e GCP_REGION="us-central1" \
+  bearer-auth-service
 ```
 
-#### Option 2: Using a .env File (Recommended)
+## Project Structure
 
-1. Copy the example environment file:
-```bash
-cp .env.example .env
+```
+.
+├── main.py              # Flask application with JWT authentication
+├── requirements.txt     # Python dependencies
+├── Dockerfile          # Container image definition
+├── deploy.sh           # Automated deployment script
+├── generate_jwt.py     # JWT token generator utility
+├── .env.example        # Environment variables template
+├── .gitignore         # Git ignore patterns
+└── README.md          # This file
 ```
 
-2. Edit `.env` with your configuration:
-```bash
-PROJECT_ID=my-gcp-project-123
-REGION=us-central1
-JWT_SECRET_KEY=$(openssl rand -base64 32)  # Generate secure secret key
-```
+## Security Best Practices
 
-3. Run the deployment script:
-```bash
-./deploy.sh
-```
+1. **Secret Management**: JWT secrets are stored in Google Secret Manager, never in code
+2. **Token Expiration**: Tokens expire after a configurable time period
+3. **Signature Verification**: All tokens are cryptographically verified
+4. **HTTPS Only**: Cloud Run automatically provides TLS/SSL
+5. **IAM Permissions**: Service account uses least-privilege principle
+6. **Environment Variables**: Sensitive data never committed to repository
 
-The script will:
-- Validate all required environment variables
-- Enable necessary Google Cloud APIs
-- Store the JWT secret key in Secret Manager (not as plain environment variable)
-- Build the container image using Google Cloud Build
-- Deploy to Cloud Run with optimal settings
-- Output the service URL and test commands
+## Configuration Options
 
-#### After Deployment: Generate JWT Tokens
-
-Once deployed, generate JWT tokens to test the service:
-
-```bash
-# Use the same secret key from your .env file
-python3 generate_jwt.py --secret "your-jwt-secret-key-value"
-
-# This will output a JWT token starting with eyJ
-# Use this token to make authenticated requests
-```
-
-### Configuration Options
-
-The deployment script supports various configuration options via environment variables:
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `PROJECT_ID` | ✅ Yes | - | Your GCP project ID |
-| `REGION` | ✅ Yes | - | GCP region for deployment |
-| `JWT_SECRET_KEY` | ✅ Yes | - | Secret key for JWT signing and verification |
-| `SERVICE_NAME` | No | `gcp-bearer-auth-service` | Cloud Run service name |
-| `JWT_SECRET_NAME` | No | `jwt-secret-key` | Secret Manager secret name |
-| `PORT` | No | `8080` | Container port |
-| `MEMORY` | No | `512Mi` | Memory allocation |
-| `CPU` | No | `1` | CPU allocation |
-| `MAX_INSTANCES` | No | `10` | Maximum autoscaling instances |
-| `MIN_INSTANCES` | No | `0` | Minimum instances (0 = scale to zero) |
-| `TIMEOUT` | No | `300` | Request timeout in seconds |
-| `ALLOW_UNAUTHENTICATED` | No | `true` | Allow public access to service |
-
-### Manual Deployment
-
-If you prefer manual deployment:
-
-```bash
-# Enable required APIs
-gcloud services enable secretmanager.googleapis.com
-gcloud services enable cloudbuild.googleapis.com
-gcloud services enable run.googleapis.com
-
-# Create secret for JWT secret key
-echo -n "your-jwt-secret-key" | gcloud secrets create jwt-secret-key \
-  --replication-policy=automatic \
-  --data-file=-
-
-# Build and push the image
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/gcp-bearer-auth-service
-
-# Deploy to Cloud Run
-gcloud run deploy gcp-bearer-auth-service \
-  --image gcr.io/YOUR_PROJECT_ID/gcp-bearer-auth-service \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --update-secrets JWT_SECRET_KEY=jwt-secret-key:latest \
-  --memory 512Mi \
-  --cpu 1
-```
-
-## Testing the Deployed Service
-
-After deployment, test your service:
-
-```bash
-# Get your service URL
-SERVICE_URL=$(gcloud run services describe gcp-bearer-auth-service --region us-central1 --format 'value(status.url)')
-
-# Test the health endpoint (public)
-curl $SERVICE_URL/api/health
-
-# Generate a JWT token (use the same secret key from deployment)
-python3 generate_jwt.py --secret "your-jwt-secret-key"
-
-# Test the secure endpoint with JWT authentication
-# Replace YOUR_JWT_TOKEN with the token from the generator (starts with eyJ)
-curl -H "Authorization: Bearer YOUR_JWT_TOKEN" $SERVICE_URL/api/secure
-
-# Example with actual JWT token:
-curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." $SERVICE_URL/api/secure
-```
-
-## Runtime Configuration
-
-### Environment Variables (Application)
+All configuration can be set via environment variables in `.env`:
 
 | Variable | Description | Default |
-|----------|-------------|---------||
-| `JWT_SECRET_KEY` | Secret key for JWT signing/verification (provided via Secret Manager) | `default-secret-key` |
-| `PORT` | Port the service listens on | `8080` |
+|----------|-------------|--------|
+| `PROJECT_ID` | GCP Project ID | Required |
+| `REGION` | Cloud Run region | Required |
+| `JWT_SECRET_KEY` | Secret key for JWT signing | Required |
+| `GCP_PROJECT_ID` | Project ID for Cloud Run API | Required |
+| `GCP_REGION` | Region for Cloud Run API | us-central1 |
+| `SERVICE_NAME` | Cloud Run service name | gcp-bearer-auth-service |
+| `JWT_SECRET_NAME` | Secret Manager secret name | jwt-secret-key |
+| `PORT` | Application port | 8080 |
+| `MEMORY` | Container memory limit | 512Mi |
+| `CPU` | Container CPU allocation | 1 |
+| `MAX_INSTANCES` | Maximum service instances | 10 |
+| `MIN_INSTANCES` | Minimum service instances | 0 |
+| `TIMEOUT` | Request timeout (seconds) | 300 |
+| `ALLOW_UNAUTHENTICATED` | Allow public access | true |
 
-### JWT Token Structure
+## Troubleshooting
 
-The service expects JWT tokens with the following structure:
+### Common Issues
 
-```json
-{
-  "sub": "cloud-run-service",
-  "iat": 1699123456,
-  "exp": 1730659456,
-  "iss": "gcp-bearer-auth-service"
-}
-```
+**Token doesn't start with "eyJ":**
+- Tokens are JWT format and should start with `eyJ`
+- Use the provided `generate_jwt.py` script to generate tokens
 
-- `sub` (subject): Identifies the token purpose
-- `iat` (issued at): When the token was created
-- `exp` (expiration): When the token expires
-- `iss` (issuer): Token issuer identifier
+**401 Unauthorized Error:**
+- Verify token is included in Authorization header
+- Check token hasn't expired
+- Ensure JWT_SECRET_KEY matches between token generation and service
 
-Tokens are signed with the HS256 algorithm using the `JWT_SECRET_KEY`.
+**403 Permission Denied (services endpoint):**
+- Verify service account has `roles/run.viewer` role
+- Check GCP_PROJECT_ID and GCP_REGION are set correctly
 
-## Security Considerations
+**Deployment Fails:**
+- Verify billing is enabled on GCP project
+- Check gcloud CLI is authenticated: `gcloud auth login`
+- Ensure required APIs are enabled
 
-- ✅ **JWT Authentication**: Uses industry-standard JSON Web Tokens with signature verification
-- ✅ **Token Expiration**: Tokens automatically expire (default 365 days, configurable)
-- ✅ **Secrets in Secret Manager**: JWT secret keys stored in Google Secret Manager, not as plain environment variables
-- ✅ **HTTPS by default**: Cloud Run provides automatic HTTPS for all services
-- ✅ **Strong secret keys**: Generate cryptographically secure keys using `openssl rand -base64 32`
-- ✅ **Signature verification**: Every JWT is verified for authenticity and integrity
-- ✅ **IAM integration**: Control access using Google Cloud IAM roles and service accounts
-- 🔄 **Secret rotation**: Update keys by running the deployment script with a new `JWT_SECRET_KEY`
-- 📊 **Monitoring**: Use Cloud Logging and Cloud Monitoring to track access patterns
-- 🔒 **Network security**: Consider using VPC ingress controls for additional protection
-
-### JWT Security Best Practices
-
-1. **Keep secret keys secure**: Never commit `JWT_SECRET_KEY` to version control
-2. **Use strong secret keys**: Minimum 32 bytes of random data
-3. **Set appropriate expiration**: Balance security and convenience (shorter = more secure)
-4. **Rotate keys regularly**: Update the secret key periodically
-5. **Monitor token usage**: Track failed authentication attempts
-6. **Use HTTPS only**: JWT tokens should only be transmitted over secure connections
-
-### Generating a Secure Secret Key
+### Viewing Logs
 
 ```bash
-# Generate a random 32-byte secret key (base64 encoded)
-openssl rand -base64 32
-
-# Or use the built-in generator
-python3 generate_jwt.py --generate-secret
+# View Cloud Run logs
+gcloud run services logs read bearer-auth-service \
+  --region=us-central1 \
+  --project=your-project-id
 ```
 
 ## License
 
-MIT
+MIT License - See LICENSE file for details
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
